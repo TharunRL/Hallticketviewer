@@ -7,9 +7,9 @@ on:
 
 env:
   # IMPORTANT: Update these with the unique names from your main.tf file
-  ACR_NAME: "youruniqueacrname123"
-  FRONTEND_APP_NAME: "your-unique-frontend-app-123"
-  BACKEND_APP_NAME: "your-unique-backend-app-123"
+  ACR_NAME: "hallticketviewercontainer289"
+  FRONTEND_APP_NAME: "hallticket-frontend-app-123"
+  BACKEND_APP_NAME: "hallticket-backend-app-123"
 
 jobs:
   build-and-push:
