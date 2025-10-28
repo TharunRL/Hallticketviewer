@@ -7,7 +7,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const port = 5001;
+const port = process.env.PORT || 3000;
 
 const GEMINI_API_KEY = "AIzaSyCrOzKWo6aa2Zr5SLL1fxX143toJqT0B-w"; 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -37,6 +37,11 @@ async function connectToDb() {
 }
 
 // --- API Endpoints ---
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', message: 'Backend is running' });
+});
 
 app.get('/api/dashboard-data', async (req, res) => {
     try {
@@ -371,10 +376,6 @@ app.get('/api/hallticket/:student_id', async (req, res) => {
         console.error("Error fetching hall ticket data:", error);
         res.status(500).json({ message: error.message || 'Failed to fetch hall ticket data.' });
     }
-});
-
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
 });
 
 app.listen(port, () => {
