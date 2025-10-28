@@ -5,6 +5,8 @@ on:
   push:
     branches: [ "main" ]
 
+permissions:
+  contents: read
 env:
   # IMPORTANT: Update these with the unique names from your main.tf file
   ACR_NAME: "hallticketviewercontainer289"
