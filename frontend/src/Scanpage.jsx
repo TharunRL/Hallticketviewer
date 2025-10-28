@@ -76,7 +76,7 @@ const Scanpage = () => {
             const decodedText = await fileScanner.scanFile(file, /* showImage= */ false);
             
             // Stop the camera scanner before redirecting
-            try {
+            try { 
                 await fileScanner.stop();
             } catch (stopErr) {
                 console.error("Failed to stop scanner after file scan", stopErr);
