@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:5001/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://hallticket-backend.graywave-4f251e45.centralindia.azurecontainerapps.io/api';
 
 const HallTicket = () => {
     const [studentData, setStudentData] = useState(null);
