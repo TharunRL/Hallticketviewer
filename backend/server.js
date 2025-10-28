@@ -12,7 +12,27 @@ var limiter = RateLimit({
 
 // apply rate limiter to all requests
 app.use(limiter);
-app.use(cors());
+
+// CORS Configuration
+app.use(cors({
+    origin: [
+        'https://hallticket-frontend.graywave-4f251e45.centralindia.azurecontainerapps.io',
+        'http://localhost:5173', // For local development
+        'http://localhost:3000'
+    ],
+    credentials: true
+}));
+
+// Security Headers Middleware
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Content-Security-Policy', "default-src 'self'");
+    next();
+});
+
 app.use(express.json());
 
 const port = process.env.PORT || 3000;
