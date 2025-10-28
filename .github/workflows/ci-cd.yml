@@ -8,8 +8,9 @@ on:
 env:
   # IMPORTANT: Update these with the unique names from your main.tf file
   ACR_NAME: "hallticketviewercontainer289"
-  FRONTEND_APP_NAME: "hallticket-frontend-app-123"
-  BACKEND_APP_NAME: "hallticket-backend-app-123"
+  FRONTEND_APP_NAME: "hallticket-frontend"
+  BACKEND_APP_NAME: "hallticket-backend"
+  RESOURCE_GROUP: "react-express-rg"
 
 jobs:
   build-and-push:
@@ -31,14 +32,18 @@ jobs:
     # This step builds the React frontend Docker image and pushes it to ACR
     - name: 'Build and Push Frontend'
       run: |
-        docker build -t ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }} ./frontend
+        docker build -t ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }} \
+                     -t ${{ env.ACR_NAME }}.azurecr.io/frontend:latest ./frontend
         docker push ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }}
+        docker push ${{ env.ACR_NAME }}.azurecr.io/frontend:latest
 
     # This step builds the Express backend Docker image and pushes it to ACR
     - name: 'Build and Push Backend'
       run: |
-        docker build -t ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }} ./backend
+        docker build -t ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }} \
+                     -t ${{ env.ACR_NAME }}.azurecr.io/backend:latest ./backend
         docker push ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }}
+        docker push ${{ env.ACR_NAME }}.azurecr.io/backend:latest
 
   deploy:
     runs-on: ubuntu-latest
@@ -50,16 +55,18 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    # This step deploys the frontend container to your Azure App Service
-    - name: 'Deploy Frontend to App Service'
-      uses: azure/webapps-deploy@v2
-      with:
-        app-name: ${{ env.FRONTEND_APP_NAME }}
-        images: '${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }}'
+    # This step deploys the frontend container to Azure Container App
+    - name: 'Deploy Frontend to Container App'
+      run: |
+        az containerapp update \
+          --name ${{ env.FRONTEND_APP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --image ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }}
 
-    # This step deploys the backend container to your Azure App Service
-    - name: 'Deploy Backend to App Service'
-      uses: azure/webapps-deploy@v2
-      with:
-        app-name: ${{ env.BACKEND_APP_NAME }}
-        images: '${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }}'
+    # This step deploys the backend container to Azure Container App
+    - name: 'Deploy Backend to Container App'
+      run: |
+        az containerapp update \
+          --name ${{ env.BACKEND_APP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --image ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }}

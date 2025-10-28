@@ -26,73 +26,156 @@ resource "azurerm_container_registry" "acr" {
 }
 
 # ---
-# 4. Create the App Service Plan
-# This defines the underlying compute resources. We're using the F1 Free tier. 💰
-resource "azurerm_service_plan" "plan" {
-  name                = "react-express-free-plan"
+# 4. Create a Log Analytics Workspace
+# Container Apps require a Log Analytics workspace for logging and monitoring
+resource "azurerm_log_analytics_workspace" "logs" {
+  name                = "hallticket-logs"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
-  os_type             = "Linux"
-  sku_name            = "F1" # This is the magic key for the FREE tier.
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
 }
 
 # ---
-# 5. Create the Web App for the React Frontend container
-resource "azurerm_linux_web_app" "frontend" {
-  # This name also needs to be globally unique as it forms a URL.
-  name                = "hallticket-frontend-app-123" 
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_service_plan.plan.location
-  service_plan_id     = azurerm_service_plan.plan.id
-
-  # This section tells App Service how to find your Docker image.
-  # The actual image tag will be supplied by your CI/CD pipeline during deployment.
-  site_config {
-    always_on = false # Required for the Free (F1) tier
-  }
-
-  identity {
-    type = "SystemAssigned"
-  }
+# 5. Create the Container Apps Environment
+# This is the secure boundary and networking configuration for your Container Apps
+resource "azurerm_container_app_environment" "env" {
+  name                       = "hallticket-containerapp-env"
+  resource_group_name        = azurerm_resource_group.rg.name
+  location                   = azurerm_resource_group.rg.location
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.logs.id
 }
 
 # ---
-# 6. Create the Web App for the Express Backend container
-resource "azurerm_linux_web_app" "backend" {
-  # This name also needs to be globally unique.
-  name                = "hallticket-backend-app-123"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_service_plan.plan.location
-  service_plan_id     = azurerm_service_plan.plan.id
+# 6. Create the Container App for the React Frontend
+resource "azurerm_container_app" "frontend" {
+  name                         = "hallticket-frontend"
+  resource_group_name          = azurerm_resource_group.rg.name
+  container_app_environment_id = azurerm_container_app_environment.env.id
+  revision_mode                = "Single"
 
-  site_config {
-    always_on = false # Required for the Free (F1) tier
-
-    # These are environment variables for your backend container.
-    # Your Express app can access these to know where the frontend is (for CORS)
-    # or to get database secrets.
-    
-  }
-app_settings = {
-      "FRONTEND_URL" = "https://${azurerm_linux_web_app.frontend.default_hostname}"
+  template {
+    container {
+      name   = "frontend"
+      image  = "${azurerm_container_registry.acr.login_server}/frontend:latest"
+      cpu    = 0.25
+      memory = "0.5Gi"
     }
+
+    min_replicas = 0
+    max_replicas = 1
+  }
+
+  ingress {
+    external_enabled = true
+    target_port      = 80
+    traffic_weight {
+      percentage      = 100
+      latest_revision = true
+    }
+  }
+
   identity {
     type = "SystemAssigned"
+  }
+
+  registry {
+    server               = azurerm_container_registry.acr.login_server
+    username             = azurerm_container_registry.acr.admin_username
+    password_secret_name = "acr-password"
+  }
+
+  secret {
+    name  = "acr-password"
+    value = azurerm_container_registry.acr.admin_password
   }
 }
 
 # ---
-# 7. Grant App Services Permission to Pull from ACR
-# This creates a role assignment that securely allows your App Services
+# 7. Create the Container App for the Express Backend
+resource "azurerm_container_app" "backend" {
+  name                         = "hallticket-backend"
+  resource_group_name          = azurerm_resource_group.rg.name
+  container_app_environment_id = azurerm_container_app_environment.env.id
+  revision_mode                = "Single"
+
+  template {
+    container {
+      name   = "backend"
+      image  = "${azurerm_container_registry.acr.login_server}/backend:latest"
+      cpu    = 0.25
+      memory = "0.5Gi"
+
+      env {
+        name  = "FRONTEND_URL"
+        value = "https://${azurerm_container_app.frontend.ingress[0].fqdn}"
+      }
+    }
+
+    min_replicas = 0
+    max_replicas = 1
+  }
+
+  ingress {
+    external_enabled = true
+    target_port      = 3000
+    traffic_weight {
+      percentage      = 100
+      latest_revision = true
+    }
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  registry {
+    server               = azurerm_container_registry.acr.login_server
+    username             = azurerm_container_registry.acr.admin_username
+    password_secret_name = "acr-password"
+  }
+
+  secret {
+    name  = "acr-password"
+    value = azurerm_container_registry.acr.admin_password
+  }
+}
+
+# ---
+# 8. Grant Container Apps Permission to Pull from ACR
+# This creates a role assignment that securely allows your Container Apps
 # to pull the container images from your private ACR without needing passwords.
 resource "azurerm_role_assignment" "acrpull_frontend" {
   scope                = azurerm_container_registry.acr.id
   role_definition_name = "AcrPull"
-  principal_id         = azurerm_linux_web_app.frontend.identity[0].principal_id
+  principal_id         = azurerm_container_app.frontend.identity[0].principal_id
 }
 
 resource "azurerm_role_assignment" "acrpull_backend" {
   scope                = azurerm_container_registry.acr.id
   role_definition_name = "AcrPull"
-  principal_id         = azurerm_linux_web_app.backend.identity[0].principal_id
+  principal_id         = azurerm_container_app.backend.identity[0].principal_id
+}
+
+# ---
+# 9. Outputs
+# These will display important information after deployment
+output "frontend_url" {
+  description = "URL of the frontend Container App"
+  value       = "https://${azurerm_container_app.frontend.ingress[0].fqdn}"
+}
+
+output "backend_url" {
+  description = "URL of the backend Container App"
+  value       = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
+}
+
+output "acr_login_server" {
+  description = "Login server for the Container Registry"
+  value       = azurerm_container_registry.acr.login_server
+}
+
+output "resource_group_name" {
+  description = "Name of the resource group"
+  value       = azurerm_resource_group.rg.name
 }

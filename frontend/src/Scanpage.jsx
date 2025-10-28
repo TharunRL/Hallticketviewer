@@ -1,12 +1,11 @@
 import React, { useEffect, useRef } from 'react';
-// Import the full library, not just the scanner, for file-based scanning
 import { Html5Qrcode, Html5QrcodeScanType } from 'html5-qrcode';
 
 const Scanpage = () => {
-    // useRef to hold a reference to the file input element
     const fileInputRef = useRef(null);
+    const html5QrcodeScannerRef = useRef(null);
 
-    // This function remains the core logic for what to do after a successful scan
+    // Core logic for handling a successful scan
     const onScanSuccess = (decodedText) => {
         console.log(`Scan result: ${decodedText}`);
         
@@ -14,9 +13,8 @@ const Scanpage = () => {
             const url = new URL(decodedText);
             const registerNo = url.searchParams.get("RegisterNo");
             if (registerNo) {
-                // Redirect to the hall ticket page
-                window.location.pathname = `/hallticket`;
-                window.location.search = `?RegisterNo=${registerNo}`;
+                // Redirect reliably in a single step
+                window.location.href = `/hallticket?RegisterNo=${registerNo}`;
             } else {
                 alert("Error: QR Code does not contain a Register Number.");
             }
@@ -25,9 +23,11 @@ const Scanpage = () => {
         }
     };
 
-    // --- Effect for Live Camera Scanning ---
+    // Effect for initializing and running the live camera scanner
     useEffect(() => {
-        // This configures the camera scanner
+        html5QrcodeScannerRef.current = new Html5Qrcode('qr-reader');
+        const scanner = html5QrcodeScannerRef.current;
+
         const config = {
             fps: 10,
             qrbox: (viewfinderWidth, viewfinderHeight) => {
@@ -37,10 +37,7 @@ const Scanpage = () => {
             supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
         };
         
-        const scanner = new Html5Qrcode('qr-reader');
-
         const successCallback = (decodedText, decodedResult) => {
-            // Stop scanning after a successful scan
             scanner.stop()
                 .then(() => onScanSuccess(decodedText))
                 .catch(err => console.error("Failed to stop scanner", err));
@@ -50,10 +47,8 @@ const Scanpage = () => {
             // Errors are ignored to allow continuous scanning
         };
 
-        // Start scanning
         scanner.start({ facingMode: "environment" }, config, successCallback, errorCallback)
             .catch(err => {
-                 // Don't log "camera not found" as an error on desktops
                 if (err.name !== "NotAllowedError" && err.name !== "NotFoundError") {
                     console.error("Unable to start scanner", err);
                 }
@@ -61,27 +56,38 @@ const Scanpage = () => {
 
         // Cleanup function to stop the camera when the component unmounts
         return () => {
-            // Check if the scanner has a 'getState' method and is not 'NOT_STARTED'
             if (scanner && scanner.getState() && scanner.getState() !== 1) { // 1 is Html5QrcodeScannerState.NOT_STARTED
                  scanner.stop().catch(error => {
                     console.error("Failed to stop the scanner on unmount.", error);
                 });
             }
         };
-    }, []); // Empty array ensures this effect runs only once
+    }, []); // Empty dependency array ensures this runs only once on mount
 
-    // --- Handler for File Upload ---
+    // Handler for the file upload input change
     const handleFileChange = async (e) => {
         const file = e.target.files[0];
-        if (!file) return;
+        if (!file || !html5QrcodeScannerRef.current) return;
 
-        const fileScanner = new Html5Qrcode(/* verbose= */ false);
+        const fileScanner = html5QrcodeScannerRef.current;
 
         try {
+            // Scan the file
             const decodedText = await fileScanner.scanFile(file, /* showImage= */ false);
+            
+            // Stop the camera scanner before redirecting
+            try {
+                await fileScanner.stop();
+            } catch (stopErr) {
+                console.error("Failed to stop scanner after file scan", stopErr);
+            }
+            
             onScanSuccess(decodedText);
         } catch (err) {
-            alert(`Error scanning file: ${err.name === 'NotFoundException' ? 'No QR code found in the image.' : err.message}`);
+            const errorMessage = err.name === 'NotFoundException' 
+                ? 'No QR code found in the image.' 
+                : (err.message || 'Unknown error occurred while scanning.');
+            alert(`Error scanning file: ${errorMessage}`);
         }
     };
     
@@ -90,7 +96,7 @@ const Scanpage = () => {
         fileInputRef.current.click();
     };
 
-    // --- NEW STYLING ---
+    // JSX for the component's UI
     return (
         <div className="bg-gray-900 flex flex-col items-center justify-center min-h-screen text-white font-sans p-4">
             <div className="text-center mb-8">
@@ -100,18 +106,15 @@ const Scanpage = () => {
 
             {/* --- Live Camera Scanner View with Targeting Frame --- */}
             <div className="w-full max-w-sm aspect-square relative mb-6">
-                {/* Corner Brackets */}
                 <div className="absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 border-cyan-400 rounded-tl-lg"></div>
                 <div className="absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 border-cyan-400 rounded-tr-lg"></div>
                 <div className="absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 border-cyan-400 rounded-bl-lg"></div>
                 <div className="absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 border-cyan-400 rounded-br-lg"></div>
                 
-                {/* Scan Line Animation */}
                 <div className="absolute inset-4 overflow-hidden rounded-lg">
                     <div className="scan-line"></div>
                 </div>
 
-                {/* QR Code Reader Viewfinder */}
                 <div id="qr-reader" className="w-full h-full"></div>
             </div>
 
