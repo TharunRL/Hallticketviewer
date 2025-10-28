@@ -19,6 +19,9 @@ FROM nginx:stable-alpine
 # Copy the static files from the 'build' stage
 COPY --from=build /app/dist /usr/share/nginx/html
 
+# Copy custom nginx configuration for SPA routing
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
 # Nginx listens on port 80 by default
 EXPOSE 80
 
