@@ -7,6 +7,10 @@ import HallTicket from './HallTicket';
 // 1. Import the new Scanner component
 import './index.css';
 import Scanpage from './Scanpage';
+import { initializeAppInsights } from './appInsights';
+
+// Initialize Application Insights
+initializeAppInsights();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 

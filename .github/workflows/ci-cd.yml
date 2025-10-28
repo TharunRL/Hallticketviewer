@@ -31,11 +31,24 @@ jobs:
     - name: 'ACR Login'
       run: az acr login --name ${{ env.ACR_NAME }}
 
+    # Get Application Insights connection string
+    - name: 'Get Application Insights Connection String'
+      id: appinsights
+      run: |
+        CONN_STRING=$(az monitor app-insights component show \
+          --app hallticket-appinsights \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --query connectionString -o tsv)
+        echo "::add-mask::$CONN_STRING"
+        echo "connection_string=$CONN_STRING" >> $GITHUB_OUTPUT
+
     # This step builds the React frontend Docker image and pushes it to ACR
     - name: 'Build and Push Frontend'
       run: |
-        docker build -t ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }} \
-                     -t ${{ env.ACR_NAME }}.azurecr.io/frontend:latest ./frontend
+        docker build \
+          --build-arg VITE_APPLICATIONINSIGHTS_CONNECTION_STRING="${{ steps.appinsights.outputs.connection_string }}" \
+          -t ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }} \
+          -t ${{ env.ACR_NAME }}.azurecr.io/frontend:latest ./frontend
         docker push ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }}
         docker push ${{ env.ACR_NAME }}.azurecr.io/frontend:latest
 

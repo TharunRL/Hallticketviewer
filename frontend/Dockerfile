@@ -9,6 +9,10 @@ RUN npm install
 
 COPY . .
 
+# Accept build argument for Application Insights connection string
+ARG VITE_APPLICATIONINSIGHTS_CONNECTION_STRING
+ENV VITE_APPLICATIONINSIGHTS_CONNECTION_STRING=$VITE_APPLICATIONINSIGHTS_CONNECTION_STRING
+
 # NOTE: npm run dev is for development. For production, you must build the static files.
 # The 'npm run build' command creates an optimized 'dist' folder.
 RUN npm run build

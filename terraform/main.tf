@@ -37,6 +37,17 @@ resource "azurerm_log_analytics_workspace" "logs" {
 }
 
 # ---
+# 4a. Create Application Insights
+# Application Insights provides application performance monitoring and telemetry
+resource "azurerm_application_insights" "appinsights" {
+  name                = "hallticket-appinsights"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  workspace_id        = azurerm_log_analytics_workspace.logs.id
+  application_type    = "web"
+}
+
+# ---
 # 5. Create the Container Apps Environment
 # This is the secure boundary and networking configuration for your Container Apps
 resource "azurerm_container_app_environment" "env" {
@@ -110,6 +121,11 @@ resource "azurerm_container_app" "backend" {
         name  = "FRONTEND_URL"
         value = "https://${azurerm_container_app.frontend.ingress[0].fqdn}"
       }
+
+      env {
+        name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
+        value = azurerm_application_insights.appinsights.connection_string
+      }
     }
 
     min_replicas = 0
@@ -178,4 +194,16 @@ output "acr_login_server" {
 output "resource_group_name" {
   description = "Name of the resource group"
   value       = azurerm_resource_group.rg.name
+}
+
+output "appinsights_connection_string" {
+  description = "Application Insights connection string"
+  value       = azurerm_application_insights.appinsights.connection_string
+  sensitive   = true
+}
+
+output "appinsights_instrumentation_key" {
+  description = "Application Insights instrumentation key"
+  value       = azurerm_application_insights.appinsights.instrumentation_key
+  sensitive   = true
 }
