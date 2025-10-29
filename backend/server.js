@@ -236,8 +236,25 @@ app.post('/api/generate-allocation-plan', async (req, res) => {
             The user has provided these specific instructions: "${prompt}"
             Generate a JSON object containing two keys:
             1. "reasoning": A brief, natural-language explanation of your plan.
-            2. "plan": An array of allocation objects. Each object must have "student_id", "hall_id", and a unique "seat_number".
-            IMPORTANT: Respond ONLY with the raw JSON object. Do not wrap it in markdown.`;
+            2. "plan": An array of allocation objects. Each object must have:
+               - "student_id": string, exactly as provided in the student list
+               - "hall_id": integer, from the available halls
+               - "seat_number": string, format as "A1", "A2", "B1", etc. (maximum 10 characters)
+            
+            IMPORTANT FORMATTING RULES:
+            - seat_number MUST be a string (e.g., "A1", "B15", "C3")
+            - seat_number MUST be unique within each hall
+            - seat_number MUST NOT exceed 10 characters
+            - Respond ONLY with the raw JSON object. Do not wrap it in markdown code blocks.
+            
+            Example format:
+            {
+              "reasoning": "Allocated students based on...",
+              "plan": [
+                {"student_id": "S001", "hall_id": 1, "seat_number": "A1"},
+                {"student_id": "S002", "hall_id": 1, "seat_number": "A2"}
+              ]
+            }`;
         
         console.log('Calling Gemini AI...');
         const result = await model.generateContent(fullPrompt);
@@ -274,9 +291,17 @@ app.post('/api/execute-allocation-plan', async (req, res) => {
     
     // Validate plan structure
     for (let i = 0; i < plan.length; i++) {
-        if (!plan[i].student_id || !plan[i].hall_id || !plan[i].seat_number) {
+        const item = plan[i];
+        if (!item.student_id || !item.hall_id || item.seat_number === undefined || item.seat_number === null) {
             return res.status(400).json({ 
-                message: `Invalid plan item at index ${i}: missing student_id, hall_id, or seat_number` 
+                message: `Invalid plan item at index ${i}: missing student_id, hall_id, or seat_number. Got: ${JSON.stringify(item)}` 
+            });
+        }
+        
+        // Check seat_number type
+        if (typeof item.seat_number !== 'string' && typeof item.seat_number !== 'number') {
+            return res.status(400).json({ 
+                message: `Invalid seat_number type at index ${i}: expected string or number, got ${typeof item.seat_number}` 
             });
         }
     }
@@ -289,9 +314,25 @@ app.post('/api/execute-allocation-plan', async (req, res) => {
         
         for (const alloc of plan) {
             const request = new sql.Request(transaction);
+            
+            // Convert seat_number to string and ensure it's valid
+            let seatNumber = alloc.seat_number;
+            if (typeof seatNumber === 'number') {
+                seatNumber = seatNumber.toString();
+            } else if (typeof seatNumber !== 'string') {
+                throw new Error(`Invalid seat_number type for student ${alloc.student_id}: ${typeof seatNumber}`);
+            }
+            
+            // Validate seat_number length (max 10 chars for VarChar(10))
+            if (seatNumber.length > 10) {
+                throw new Error(`Seat number too long for student ${alloc.student_id}: "${seatNumber}" (${seatNumber.length} chars)`);
+            }
+            
+            console.log(`Allocating student ${alloc.student_id} to hall ${alloc.hall_id}, seat ${seatNumber}`);
+            
             const result = await request
                 .input('hall_id', sql.Int, alloc.hall_id)
-                .input('seat_number', sql.VarChar(10), alloc.seat_number)
+                .input('seat_number', sql.VarChar(10), seatNumber)
                 .input('student_id', sql.VarChar(50), alloc.student_id)
                 .input('schedule_id', sql.Int, schedule_id)
                 .query(`
