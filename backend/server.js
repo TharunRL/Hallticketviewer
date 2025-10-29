@@ -200,6 +200,8 @@ app.post('/api/register-students', async (req, res) => {
 
 app.post('/api/generate-allocation-plan', async (req, res) => {
     const { schedule_id, prompt } = req.body;
+    console.log('Generate plan request:', { schedule_id, promptLength: prompt?.length });
+    
     if (!schedule_id || !prompt) {
         return res.status(400).json({ message: 'Schedule ID and prompt are required.' });
     }
@@ -213,11 +215,16 @@ app.post('/api/generate-allocation-plan', async (req, res) => {
                 JOIN dbo.students s ON sa.student_id = s.student_id
                 WHERE sa.schedule_id = @schedule_id AND sa.hall_id IS NULL;
             `);
+        
+        console.log(`Found ${studentsToAllocate.recordset.length} un-allocated students`);
+        
         if (studentsToAllocate.recordset.length === 0) {
             return res.status(404).json({ message: 'No un-allocated students found for this schedule.' });
         }
         const hallsResult = await pool.request().query('SELECT hall_id, hall_name, capacity FROM dbo.exam_halls');
         const availableHalls = hallsResult.recordset;
+        
+        console.log(`Found ${availableHalls.length} available halls`);
         
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
         const fullPrompt = `
@@ -232,8 +239,10 @@ app.post('/api/generate-allocation-plan', async (req, res) => {
             2. "plan": An array of allocation objects. Each object must have "student_id", "hall_id", and a unique "seat_number".
             IMPORTANT: Respond ONLY with the raw JSON object. Do not wrap it in markdown.`;
         
+        console.log('Calling Gemini AI...');
         const result = await model.generateContent(fullPrompt);
         const responseText = result.response.text();
+        console.log('AI response received, length:', responseText.length);
 
         // ### THIS SECTION IS NOW CORRECTED ###
         // Clean and parse the AI's response to handle markdown wrappers.
@@ -244,6 +253,8 @@ app.post('/api/generate-allocation-plan', async (req, res) => {
         }
         const jsonString = match[0];
         const planJson = JSON.parse(jsonString);
+        
+        console.log(`AI plan parsed successfully, ${planJson.plan?.length || 0} allocations generated`);
 
         res.status(200).json(planJson);
 
@@ -255,16 +266,30 @@ app.post('/api/generate-allocation-plan', async (req, res) => {
 
 app.post('/api/execute-allocation-plan', async (req, res) => {
     const { plan, schedule_id } = req.body;
+    console.log('Execute plan request:', { planLength: plan?.length, schedule_id });
+    
     if (!plan || !schedule_id || !Array.isArray(plan) || plan.length === 0) {
-        return res.status(400).json({ message: 'A valid plan, and schedule_id are required.' });
+        return res.status(400).json({ message: 'A valid plan and schedule_id are required.' });
     }
+    
+    // Validate plan structure
+    for (let i = 0; i < plan.length; i++) {
+        if (!plan[i].student_id || !plan[i].hall_id || !plan[i].seat_number) {
+            return res.status(400).json({ 
+                message: `Invalid plan item at index ${i}: missing student_id, hall_id, or seat_number` 
+            });
+        }
+    }
+    
     const pool = await connectToDb();
     const transaction = new sql.Transaction(pool);
     try {
         await transaction.begin();
+        let updatedCount = 0;
+        
         for (const alloc of plan) {
             const request = new sql.Request(transaction);
-            await request
+            const result = await request
                 .input('hall_id', sql.Int, alloc.hall_id)
                 .input('seat_number', sql.VarChar(10), alloc.seat_number)
                 .input('student_id', sql.VarChar(50), alloc.student_id)
@@ -274,11 +299,21 @@ app.post('/api/execute-allocation-plan', async (req, res) => {
                     SET hall_id = @hall_id, seat_number = @seat_number 
                     WHERE student_id = @student_id AND schedule_id = @schedule_id;
                 `);
+            
+            if (result.rowsAffected[0] === 0) {
+                throw new Error(`Student ${alloc.student_id} not found in schedule ${schedule_id}`);
+            }
+            updatedCount++;
         }
+        
         await transaction.commit();
-        res.status(200).json({ message: `Successfully allocated seats for ${plan.length} students.` });
+        console.log(`Successfully allocated ${updatedCount} seats`);
+        res.status(200).json({ message: `Successfully allocated seats for ${updatedCount} students.` });
     } catch (error) {
-        await transaction.rollback();
+        console.error('Error executing allocation plan:', error);
+        await transaction.rollback().catch(rollbackErr => {
+            console.error('Rollback error:', rollbackErr);
+        });
         res.status(500).json({ message: error.message || 'Failed to execute allocation plan.' });
     }
 });

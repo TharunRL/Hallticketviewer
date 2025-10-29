@@ -208,7 +208,11 @@ const AIAllocationAssistant = ({ schedules, onUpdate }) => {
             await axios.post(`${API_BASE_URL}/execute-allocation-plan`, { plan: generatedPlan.plan, schedule_id: parseInt(scheduleId) });
             onUpdate('success', 'AI plan executed successfully!');
             setGeneratedPlan(null); setPrompt(''); setScheduleId('');
-        } catch (error) { onUpdate('error', 'Failed to execute AI plan.'); }
+        } catch (error) { 
+            console.error('Execute plan error:', error);
+            const errorMsg = error.response?.data?.message || error.message || 'Failed to execute AI plan.';
+            onUpdate('error', errorMsg); 
+        }
         finally { setIsLoading(false); }
     };
 
