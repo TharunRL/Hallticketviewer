@@ -1,9 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeScanType } from 'html5-qrcode';
 
 const Scanpage = () => {
     const fileInputRef = useRef(null);
     const html5QrcodeScannerRef = useRef(null);
+    const [cameraStatus, setCameraStatus] = useState('initializing'); // 'initializing', 'active', 'denied', 'error'
 
     // Core logic for handling a successful scan
     const onScanSuccess = (decodedText) => {
@@ -48,9 +49,21 @@ const Scanpage = () => {
         };
 
         scanner.start({ facingMode: "environment" }, config, successCallback, errorCallback)
+            .then(() => {
+                console.log("Camera scanner started successfully");
+                setCameraStatus('active');
+            })
             .catch(err => {
-                if (err.name !== "NotAllowedError" && err.name !== "NotFoundError") {
-                    console.error("Unable to start scanner", err);
+                console.error("Unable to start scanner", err);
+                if (err.name === "NotAllowedError") {
+                    setCameraStatus('denied');
+                    alert("Camera access denied. Please allow camera access in your browser settings and refresh the page.");
+                } else if (err.name === "NotFoundError") {
+                    setCameraStatus('error');
+                    alert("No camera found on your device. You can still use the 'Upload from File' option below.");
+                } else {
+                    setCameraStatus('error');
+                    alert("Unable to start camera: " + (err.message || "Unknown error"));
                 }
             });
 
@@ -102,6 +115,18 @@ const Scanpage = () => {
             <div className="text-center mb-8">
                 <h1 className="text-3xl font-bold text-gray-100">Invigilator Scanner</h1>
                 <p className="text-gray-400">Position the QR code inside the frame</p>
+                {cameraStatus === 'initializing' && (
+                    <p className="text-yellow-400 text-sm mt-2">🔄 Requesting camera access...</p>
+                )}
+                {cameraStatus === 'active' && (
+                    <p className="text-green-400 text-sm mt-2">✓ Camera active</p>
+                )}
+                {cameraStatus === 'denied' && (
+                    <p className="text-red-400 text-sm mt-2">✗ Camera access denied</p>
+                )}
+                {cameraStatus === 'error' && (
+                    <p className="text-orange-400 text-sm mt-2">⚠ Camera unavailable - use file upload</p>
+                )}
             </div>
 
             {/* --- Live Camera Scanner View with Targeting Frame --- */}
