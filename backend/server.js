@@ -226,13 +226,33 @@ app.post('/api/generate-allocation-plan', async (req, res) => {
         
         console.log(`Found ${availableHalls.length} available halls`);
         
+        // Get already occupied seats for this schedule
+        const occupiedSeatsResult = await pool.request()
+            .input('schedule_id', sql.Int, schedule_id)
+            .query(`
+                SELECT hall_id, seat_number 
+                FROM dbo.student_allocations 
+                WHERE schedule_id = @schedule_id 
+                  AND hall_id IS NOT NULL 
+                  AND seat_number IS NOT NULL
+            `);
+        const occupiedSeats = occupiedSeatsResult.recordset;
+        
+        console.log(`Found ${occupiedSeats.length} already occupied seats`);
+        
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
         const fullPrompt = `
             You are an expert university examination logistics planner. Your task is to create an optimal seating allocation plan for students who are already registered for an exam but do not have a seat.
+            
             Here are the un-allocated students:
             ${JSON.stringify(studentsToAllocate.recordset, null, 2)}
+            
             Here are the available exam halls with their capacities:
             ${JSON.stringify(availableHalls, null, 2)}
+            
+            IMPORTANT: These seats are ALREADY OCCUPIED and must NOT be used:
+            ${occupiedSeats.length > 0 ? JSON.stringify(occupiedSeats, null, 2) : 'None - all seats are available'}
+            
             The user has provided these specific instructions: "${prompt}"
             Generate a JSON object containing two keys:
             1. "reasoning": A brief, natural-language explanation of your plan.
@@ -245,6 +265,8 @@ app.post('/api/generate-allocation-plan', async (req, res) => {
             - seat_number MUST be a string (e.g., "A1", "B15", "C3")
             - seat_number MUST be unique within each hall
             - seat_number MUST NOT exceed 10 characters
+            - DO NOT assign any seat that is already occupied (check the occupied seats list above)
+            - Only allocate to empty/available seats
             - Respond ONLY with the raw JSON object. Do not wrap it in markdown code blocks.
             
             Example format:
@@ -315,12 +337,28 @@ app.post('/api/execute-allocation-plan', async (req, res) => {
         for (const alloc of plan) {
             const request = new sql.Request(transaction);
             
+            // Debug: Log the allocation object
+            console.log('Processing allocation:', JSON.stringify(alloc));
+            
             // Convert seat_number to string and ensure it's valid
             let seatNumber = alloc.seat_number;
+            
+            // Handle null, undefined, empty string
+            if (seatNumber === null || seatNumber === undefined || seatNumber === '') {
+                throw new Error(`seat_number is null/undefined/empty for student ${alloc.student_id}. Full allocation: ${JSON.stringify(alloc)}`);
+            }
+            
             if (typeof seatNumber === 'number') {
                 seatNumber = seatNumber.toString();
-            } else if (typeof seatNumber !== 'string') {
-                throw new Error(`Invalid seat_number type for student ${alloc.student_id}: ${typeof seatNumber}`);
+            } else if (typeof seatNumber === 'string') {
+                seatNumber = seatNumber.trim(); // Remove whitespace
+                if (seatNumber === '') {
+                    throw new Error(`seat_number is empty string after trim for student ${alloc.student_id}`);
+                }
+            } else if (typeof seatNumber === 'object') {
+                throw new Error(`seat_number is an object for student ${alloc.student_id}: ${JSON.stringify(seatNumber)}`);
+            } else {
+                throw new Error(`Invalid seat_number type for student ${alloc.student_id}: ${typeof seatNumber}, value: ${seatNumber}`);
             }
             
             // Validate seat_number length (max 10 chars for VarChar(10))
@@ -328,9 +366,33 @@ app.post('/api/execute-allocation-plan', async (req, res) => {
                 throw new Error(`Seat number too long for student ${alloc.student_id}: "${seatNumber}" (${seatNumber.length} chars)`);
             }
             
+            // Log character codes to check for invisible characters
+            const charCodes = Array.from(seatNumber).map(c => c.charCodeAt(0));
+            console.log(`Validated seat_number: "${seatNumber}" (type: ${typeof seatNumber}, length: ${seatNumber.length}, charCodes: ${JSON.stringify(charCodes)})`);
+            
+            // Check if seat is already occupied in this hall for this schedule
+            const checkRequest = new sql.Request(transaction);
+            const seatCheckResult = await checkRequest
+                .input('check_schedule_id', sql.Int, schedule_id)
+                .input('check_hall_id', sql.Int, alloc.hall_id)
+                .input('check_seat_number', sql.VarChar(10), seatNumber)
+                .query(`
+                    SELECT COUNT(*) as count 
+                    FROM dbo.student_allocations 
+                    WHERE schedule_id = @check_schedule_id 
+                      AND hall_id = @check_hall_id 
+                      AND seat_number = @check_seat_number
+                `);
+            
+            if (seatCheckResult.recordset[0].count > 0) {
+                throw new Error(`Seat ${seatNumber} in hall ${alloc.hall_id} is already occupied for this schedule`);
+            }
+            
             console.log(`Allocating student ${alloc.student_id} to hall ${alloc.hall_id}, seat ${seatNumber}`);
             
-            const result = await request
+            // Create new request for the update (since we used the previous one for checking)
+            const updateRequest = new sql.Request(transaction);
+            const result = await updateRequest
                 .input('hall_id', sql.Int, alloc.hall_id)
                 .input('seat_number', sql.VarChar(10), seatNumber)
                 .input('student_id', sql.VarChar(50), alloc.student_id)
